@@ -25,19 +25,17 @@ def get_compute_arch(t):
 
 kernels = '''
 extern "C"
-__global__ void ncrelu_forward(float *dst, unsigned char* mask, const float *src, int chw, int bs)
+__global__ void ncrelu_forward(float *dst, unsigned char* mask, const float *src, int chw, int total)
 {
    int tx = blockIdx.x * blockDim.x + threadIdx.x;
-   int ty = blockIdx.y * blockDim.y + threadIdx.y;
-   if(tx >= bs || ty >= chw)
+   if(tx >= total)
       return;
 
-   int i = tx * chw + ty;
-   float v = src[i];
+   float v = src[tx];
    unsigned char flag = v >= 0;
-   mask[i] = flag;
-   dst[2*chw*tx + ty] = flag ? v : 0.f;
-   dst[2*chw*tx + ty + chw] = flag ? 0.f : v;
+   mask[tx] = flag;
+   dst[tx + tx / chw * chw] = flag ? v : 0.f;
+   dst[tx + tx / chw * chw + chw] = flag ? 0.f : v;
 }
 
 extern "C"
@@ -84,9 +82,9 @@ def ncrelu_forward(input):
 
     f = module.get_function('ncrelu_forward')
 
-    f(args=[output.data_ptr(), mask.data_ptr(), input.data_ptr(), c*h*w, n],
-      block=(32,32,1),
-      grid=(GET_BLOCKS(n, 32), GET_BLOCKS(c*h*w, 32), 1),
+    f(args=[output.data_ptr(), mask.data_ptr(), input.data_ptr(), c*h*w, input.numel()],
+      block=(CUDA_NUM_THREADS,1,1),
+      grid=(GET_BLOCKS(input.numel()),1,1),
       stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
     return output, mask
 
