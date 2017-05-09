@@ -39,17 +39,16 @@ __global__ void ncrelu_forward(float *dst, unsigned char* mask, const float *src
 }
 
 extern "C"
-__global__ void ncrelu_backward(float *grad_input, const unsigned char *mask, const float *grad_output, int chw, int bs)
+__global__ void ncrelu_backward(float *grad_input, const unsigned char *mask, const float *grad_output,
+                                int chw, int total)
 {
    int tx = blockIdx.x * blockDim.x + threadIdx.x;
-   int ty = blockIdx.y * blockDim.y + threadIdx.y;
-   if(tx >= bs || ty >= chw)
+   if(tx >= total)
       return;
 
-   int i = tx * chw + ty;
-   grad_output += 2*chw*tx + ty;
-   bool flag = mask[i];
-   grad_input[i] = flag ? grad_output[0] : grad_output[chw];
+   grad_output += tx + tx / chw * chw;
+   bool flag = mask[tx];
+   grad_input[tx] = flag ? grad_output[0] : grad_output[chw];
 }
 '''
 
@@ -74,7 +73,7 @@ def compile(modules, input):
 def ncrelu_forward(input):
     module = compile(fwd_modules, input)
 
-    assert input.dim() == 4
+    assert input.dim() == 4 and input.is_contiguous()
     n, c, h, w = input.size()
 
     output = input.new(n, 2 * c, h, w)
@@ -92,13 +91,14 @@ def ncrelu_forward(input):
 def ncrelu_backward(grad_output, mask):
     module = compile(bwd_modules, grad_output)
     assert grad_output.get_device() == mask.get_device()
+    assert grad_output.is_contiguous()
     n, c, h, w = mask.size()
     grad_input = grad_output.new(mask.size())
 
     f = module.get_function('ncrelu_backward')
-    f(args=[grad_input.data_ptr(), mask.data_ptr(), grad_output.data_ptr(), c*h*w, n],
-      block=(32,32,1),
-      grid=(GET_BLOCKS(n, 32), GET_BLOCKS(c*h*w, 32), 1),
+    f(args=[grad_input.data_ptr(), mask.data_ptr(), grad_output.data_ptr(), c*h*w, mask.numel()],
+      block=(CUDA_NUM_THREADS,1,1),
+      grid=(GET_BLOCKS(mask.numel()),1,1),
       stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
     return grad_input
 
