@@ -115,4 +115,12 @@ class CDGMM(Function):
 
 
 def cdgmm(input, x):
+    """Complex multiplication with a diagonal matrix.
+
+    Does `input.mm(x.diag())` where input and x are complex.
+
+    Args:
+        input: 3D tensor with last dimension of size 2
+        x: 2D tensor with last dimension of size 2
+    """
     return CDGMM()(input, x)

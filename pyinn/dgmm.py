@@ -63,5 +63,17 @@ class DGMM(Function):
             assert grad_x.size() == x.size()
         return grad_input, grad_x
 
+
 def dgmm(input, x):
+    """Multiplication with a diagonal matrix.
+
+    Used CUDA dgmm function, sometimes is faster than expand.
+
+    In torch functions does `input.mm(x.diag())`. Both left and right
+    mutliplications are supported.
+
+    Args:
+        input: 2D tensor
+        x: 1D tensor
+    """
     return DGMM()(input, x)

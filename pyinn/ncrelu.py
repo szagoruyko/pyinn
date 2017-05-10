@@ -114,4 +114,15 @@ class NCRELU(torch.autograd.Function):
 
 
 def ncrelu(input):
-    return NCRELU()(input)
+    """ Applies NCReLU (negative concatenated ReLU) nonlinearity.
+
+    Does `torch.cat([x.clamp(min=0), x.clamp(max=0)], dim=1)` in
+    a single fused op.
+
+    Args:
+        input: 4D tensor
+    """
+    if not input.is_cuda:
+        return torch.cat([input.clamp(min=0), input.clamp(max=0)], dim=1)
+    else:
+        return NCRELU()(input)
