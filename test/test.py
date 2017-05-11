@@ -1,9 +1,7 @@
 import unittest
 import torch
 from torch.autograd import gradcheck, Variable
-from ncrelu import ncrelu
-from dgmm import dgmm
-from cdgmm import cdgmm
+from pyinn import ncrelu, dgmm, cdgmm
 import torch.nn.functional as F
 
 
@@ -15,7 +13,8 @@ class TestPYINN(unittest.TestCase):
 
     def testNCReLU(self):
         x = Variable(torch.randn(2,5,3,1).cuda(), requires_grad=True)
-        go = Variable(torch.randn(2,10,3,1).cuda(), requires_grad=False)
+        #go = Variable(torch.randn(2,10,3,1).cuda(), requires_grad=False)
+        go = torch.randn(2,10,3,1).cuda()
 
         self.assertEqual((ncrelu_ref(x).data - ncrelu(x).data).abs().sum(), 0)
 
