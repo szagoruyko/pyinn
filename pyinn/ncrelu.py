@@ -1,21 +1,14 @@
-from collections import namedtuple, defaultdict
+from collections import defaultdict
 from pynvrtc.compiler import Program
 import torch
 from cupy.cuda.function import Module
-from cupy.cuda import device
+from .utils import Stream, get_compute_arch
 
 CUDA_NUM_THREADS = 1024
 
 
 def GET_BLOCKS(N, K=CUDA_NUM_THREADS):
     return (N + K - 1) // K
-
-
-Stream = namedtuple('Stream', ['ptr'])
-
-
-def get_compute_arch(t):
-    return 'compute_%s' % device.Device().compute_capability
 
 
 # k = i_n * 2CHW + i_c * HW + i_h * W + i_w
