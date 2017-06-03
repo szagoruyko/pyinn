@@ -9,6 +9,20 @@ def ncrelu_ref(input):
     return torch.cat([F.relu(input), -F.relu(-input)], 1)
 
 
+def cdgmm_ref(A, B):
+    C = Variable(A.data.new(A.size()))
+
+    A_r = A[..., 0].contiguous().view(-1, A.size(-2))
+    A_i = A[..., 1].contiguous().view(-1, A.size(-2))
+
+    B_r = B[..., 0].contiguous().view(-1).unsqueeze(0).expand_as(A_i)
+    B_i = B[..., 1].contiguous().view(-1).unsqueeze(0).expand_as(A_r)
+
+    C[..., 0] = A_r * B_r - A_i * B_i
+    C[..., 1] = A_r * B_i + A_i * B_r
+    return C
+
+
 class TestPYINN(unittest.TestCase):
 
     def testNCReLU(self):
@@ -79,19 +93,6 @@ class TestPYINN(unittest.TestCase):
 
     def testCDGMM(self):
 
-        def cdgmm_ref(A, B):
-            C = Variable(A.data.new(A.size()))
-
-            A_r = A[..., 0].contiguous().view(-1, A.size(-2))
-            A_i = A[..., 1].contiguous().view(-1, A.size(-2))
-
-            B_r = B[..., 0].contiguous().view(-1).unsqueeze(0).expand_as(A_i)
-            B_i = B[..., 1].contiguous().view(-1).unsqueeze(0).expand_as(A_r)
-
-            C[..., 0] = A_r * B_r - A_i * B_i
-            C[..., 1] = A_r * B_i + A_i * B_r
-            return C
-
         inputs = Variable(torch.randn(16, 8, 2).cuda())
         x = Variable(torch.randn(8, 2).cuda())
 
@@ -120,6 +121,51 @@ class TestPYINN(unittest.TestCase):
         # g_ref = x.grad.data.clone()
 
         # self.assertEqual((g_ref - g_out).abs().max(), 0)
+
+    def testCDGMMscat(self):
+        shapes = [((1, 3, 40, 40, 2), (40, 40, 2)),
+                  ((1, 3, 20, 20, 2), (20, 20, 2))]
+
+        def cdgmm_ref(A, B):
+            C = Variable(A.data.new(A.size()))
+
+            A_r = A[..., 0].contiguous().view(-1, A.size(-2)*A.size(-3))
+            A_i = A[..., 1].contiguous().view(-1, A.size(-2)*A.size(-3))
+
+            B_r = B[...,0].contiguous().view(B.size(-2)*B.size(-3)).unsqueeze(0).expand_as(A_i)
+            B_i = B[..., 1].contiguous().view(B.size(-2)*B.size(-3)).unsqueeze(0).expand_as(A_r)
+
+            C[..., 0] = A_r * B_r - A_i * B_i
+            C[..., 1] = A_r * B_i + A_i * B_r
+            return C
+
+        def cdgmm_scat(A, B):
+            A_ = A.view(-1, A.size(-2)*A.size(-3), 2)
+            B_ = B.view(-1, 2)
+            return cdgmm(A_, B_).view_as(A)
+
+        for shape in shapes:
+            inputs = Variable(torch.randn(*shape[0]).cuda())
+            x = Variable(torch.randn(*shape[1]).cuda())
+
+            c_ref = cdgmm_ref(inputs, x)
+
+            c = cdgmm_scat(inputs, x)
+
+            self.assertLess((c_ref.data - c.data).abs().max(), 1e-6, 'CDGMM left')
+
+            inputs.requires_grad, x.requires_grad = True, False
+            cdgmm_scat(inputs, x).sum().backward()
+            g_out = inputs.grad.data.clone()
+
+            inputs.grad.data.zero_()
+            cdgmm_ref(inputs, x).sum().backward()
+            g_ref = inputs.grad.data.clone()
+
+            self.assertLess((g_out - g_ref).abs().max(), 1e-6, 'CDGMM grad wrt A')
+
+    # def test_gradcheck(self):
+
 
 if __name__ == '__main__':
     unittest.main()
