@@ -1,4 +1,3 @@
-from skcuda import cublas
 import torch
 from torch.autograd import Function
 
@@ -36,6 +35,7 @@ def cublas_dgmm(A, x, out=None):
         incx = 1
         handle = torch.cuda.current_blas_handle()
         stream = torch.cuda.current_stream()._as_parameter_
+        from skcuda import cublas
         cublas.cublasSetStream(handle, stream)
         args = [handle, mode, m, n, A.data_ptr(), lda, x.data_ptr(), incx, out.data_ptr(), ldc]
         if isinstance(A, torch.cuda.FloatTensor):
