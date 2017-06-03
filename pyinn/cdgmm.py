@@ -1,5 +1,4 @@
 import torch
-from collections import defaultdict
 from torch.autograd import Function
 from pynvrtc.compiler import Program
 from cupy.cuda.function import Module
@@ -25,11 +24,12 @@ CUDA_NUM_THREADS = 1024
 def GET_BLOCKS(N, K=CUDA_NUM_THREADS):
     return (N + K - 1) // K
 
-modules = defaultdict(lambda: None)
+
+modules = {}
 
 
 def compile(input):
-    if modules[input.get_device()] is None:
+    if input.get_device() not in modules:
         print 'compiling for dev', input.get_device()
         program = Program(kernel, 'ncrelu.cu')
         ptx = program.compile(['-arch=' + get_compute_arch(input)])

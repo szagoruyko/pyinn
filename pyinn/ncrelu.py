@@ -1,4 +1,3 @@
-from collections import defaultdict
 from pynvrtc.compiler import Program
 import torch
 from cupy.cuda.function import Module
@@ -45,12 +44,12 @@ __global__ void ncrelu_backward(float *grad_input, const unsigned char *mask, co
 }
 '''
 
-fwd_modules = defaultdict(lambda: None)
-bwd_modules = defaultdict(lambda: None)
+fwd_modules = {}
+bwd_modules = {}
 
 
 def compile(modules, input):
-    if modules[input.get_device()] is None:
+    if input.get_device() not in modules:
         print 'compiling for dev', input.get_device()
         program = Program(kernels, 'ncrelu.cu')
         ptx = program.compile(['-arch=' + get_compute_arch(input)])
