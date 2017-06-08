@@ -14,7 +14,8 @@ __global__ void swap(float2 *x, int total)
       return;
 
    float2 v = x[tx];
-   x[tx] = make_float2(v.y, v.x);
+   //x[tx] = make_float2(v.y, v.x);
+   x[tx] = make_float2(v.x, -v.y);
 }
 """
 
@@ -95,8 +96,11 @@ class CDGMM(Function):
         input, x = self.saved_tensors
         grad_input = grad_x = None
         if self.needs_input_grad[0]:
+            grad_output = grad_output.contiguous()
+            swap(x)
             grad_input = cublas_cdgmm(grad_output.contiguous(), x)
-            swap(grad_input)
+            swap(x)
+            
             assert grad_input.size() == input.size()
         if self.needs_input_grad[1]:
             raise NotImplementedError
