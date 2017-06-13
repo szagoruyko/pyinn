@@ -26,18 +26,19 @@ def cdgmm_ref(A, B):
 class TestPYINN(unittest.TestCase):
 
     def testNCReLU(self):
-        x = Variable(torch.randn(2,5,3,1).cuda(), requires_grad=True)
-        #go = Variable(torch.randn(2,10,3,1).cuda(), requires_grad=False)
-        go = torch.randn(2,10,3,1).cuda()
+        for dtype in [torch.cuda.FloatTensor, torch.cuda.DoubleTensor]:
+            x = Variable(torch.randn(2,5,3,1).type(dtype), requires_grad=True)
+            #go = Variable(torch.randn(2,10,3,1).cuda(), requires_grad=False)
+            go = torch.randn(2,10,3,1).type(dtype)
 
-        self.assertEqual((ncrelu_ref(x).data - ncrelu(x).data).abs().sum(), 0)
+            self.assertEqual((ncrelu_ref(x).data - ncrelu(x).data).abs().sum(), 0)
 
-        ncrelu_ref(x).backward(go)
-        gref = x.grad.data.clone()
-        x.grad.data.zero_()
-        ncrelu(x).backward(go)
-        g = x.grad.data.clone()
-        self.assertLess((g - gref).abs().sum(), 1e-8)
+            ncrelu_ref(x).backward(go)
+            gref = x.grad.data.clone()
+            x.grad.data.zero_()
+            ncrelu(x).backward(go)
+            g = x.grad.data.clone()
+            self.assertLess((g - gref).abs().sum(), 1e-8)
 
     def testDGMM(self):
         inputs = Variable(torch.randn(16, 8).cuda())

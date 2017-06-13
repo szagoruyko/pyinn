@@ -1,7 +1,8 @@
+from string import Template
 from pynvrtc.compiler import Program
 import torch
 from cupy.cuda.function import Module
-from .utils import Stream, get_compute_arch
+from .utils import Stream, get_compute_arch, Dtype
 
 CUDA_NUM_THREADS = 1024
 
@@ -17,13 +18,13 @@ def GET_BLOCKS(N, K=CUDA_NUM_THREADS):
 
 kernels = '''
 extern "C"
-__global__ void ncrelu_forward(float *dst, unsigned char* mask, const float *src, int chw, int total)
+__global__ void ncrelu_forward(${Dtype} *dst, unsigned char* mask, const ${Dtype} *src, int chw, int total)
 {
    int tx = blockIdx.x * blockDim.x + threadIdx.x;
    if(tx >= total)
       return;
 
-   float v = src[tx];
+   ${Dtype} v = src[tx];
    unsigned char flag = v >= 0;
    mask[tx] = flag;
    dst[tx + tx / chw * chw] = flag ? v : 0.f;
@@ -31,7 +32,7 @@ __global__ void ncrelu_forward(float *dst, unsigned char* mask, const float *src
 }
 
 extern "C"
-__global__ void ncrelu_backward(float *grad_input, const unsigned char *mask, const float *grad_output,
+__global__ void ncrelu_backward(${Dtype} *grad_input, const unsigned char *mask, const ${Dtype} *grad_output,
                                 int chw, int total)
 {
    int tx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -49,16 +50,18 @@ bwd_modules = {}
 
 
 def compile(modules, input):
-    if input.get_device() not in modules:
+    k = (input.get_device(), type(input))
+    if k not in modules:
         print 'compiling for dev', input.get_device()
-        program = Program(kernels, 'ncrelu.cu')
+        src = Template(kernels).substitute(Dtype=Dtype(input))
+        program = Program(src, 'ncrelu.cu')
         ptx = program.compile(['-arch=' + get_compute_arch(input)])
 
         module = Module()
         module.load(bytes(ptx.encode()))
-        modules[input.get_device()] = module
+        modules[k] = module
     else:
-        module = modules[input.get_device()]
+        module = modules[k]
     return module
 
 
