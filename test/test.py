@@ -175,6 +175,15 @@ class TestPYINN(unittest.TestCase):
         back = col2im(dst, k, s, pad)
         self.assertEqual((src - back).data.abs().max(), 0)
 
+    def test_im2col_batch(self):
+        src = Variable(torch.randn(4,8,7,7).cuda())
+        k = 1
+        pad = 0
+        s = (1,1)
+        dst = im2col(src, k, s, pad)
+        back = col2im(dst, k, s, pad)
+        self.assertEqual((src - back).data.abs().max(), 0)
+
 
 if __name__ == '__main__':
     unittest.main()

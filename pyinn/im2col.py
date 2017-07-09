@@ -88,8 +88,19 @@ __global__ void col2im_kernel(const ${Dtype}* data_col, ${Dtype}* data_im) {
 
 im2col_modules = {}
 
-def _im2col(data, kernel_size, stride, padding):
-    assert data.dim() == 3
+
+def im2col_shape(size, kernel_size, stride, padding):
+    ksize_h, ksize_w = _pair(kernel_size)
+    stride_h, stride_w = _pair(stride)
+    pad_h, pad_w = _pair(padding)
+    nInputPlane, height, width = size
+    height_col = (height + 2 * pad_h - ksize_h) // stride_h + 1
+    width_col = (width + 2 * pad_w - ksize_w) // stride_w + 1
+    return nInputPlane, ksize_h, ksize_w, height_col, width_col
+
+
+def _im2col(data,  kernel_size, stride, padding, out=None):
+    assert data.dim() == 3 and data.is_cuda
     ksize_h, ksize_w = _pair(kernel_size)
     stride_h, stride_w = _pair(stride)
     pad_h, pad_w = _pair(padding)
@@ -98,7 +109,12 @@ def _im2col(data, kernel_size, stride, padding):
     width_col = (width + 2 * pad_w - ksize_w) // stride_w + 1
     n = nInputPlane * height_col * width_col
 
-    data_col = data.new(nInputPlane, ksize_h, ksize_w, height_col, width_col)
+    shape = torch.Size((nInputPlane, ksize_h, ksize_w, height_col, width_col))
+    if out is not None:
+        assert out.size() == shape
+        data_col = out
+    else:
+        data_col = data.new(*shape)
 
     opt = dict(Dtype=Dtype(data), n=n,
                height_col=height_col,
@@ -132,17 +148,37 @@ def _im2col(data, kernel_size, stride, padding):
 col2im_modules = {}
 
 
-def _col2im(data_col, kernel_size, stride, padding):
+def col2im_shape(size, kernel_size, stride, padding, input_size=None):
+    ksize_h, ksize_w = _pair(kernel_size)
+    stride_h, stride_w = _pair(stride)
+    pad_h, pad_w = _pair(padding)
+    nInputPlane, ksize_h, ksize_w, height_col, width_col = size
+    if input_size is not None:
+        height, width = input_size
+    else:
+        height = (height_col - 1) * stride_h - 2 * pad_h + ksize_h
+        width = (width_col - 1) * stride_w - 2 * pad_w + ksize_w
+    return nInputPlane, height, width
+
+
+def _col2im(data_col, kernel_size, stride, padding, out=None, input_size=None):
     assert data_col.dim() == 5
     ksize_h, ksize_w = _pair(kernel_size)
     stride_h, stride_w = _pair(stride)
     pad_h, pad_w = _pair(padding)
     nInputPlane, ksize_h, ksize_w, height_col, width_col = data_col.size()
-    height = (height_col - 1) * stride_h - 2 * pad_h + ksize_h
-    width = (width_col - 1) * stride_w - 2 * pad_w + ksize_w
+    if input_size is not None:
+        height, width = input_size
+    else:
+        height = (height_col - 1) * stride_h - 2 * pad_h + ksize_h
+        width = (width_col - 1) * stride_w - 2 * pad_w + ksize_w
     n = nInputPlane * height * width
 
-    data = data_col.new(nInputPlane, height, width)
+    if out is not None:
+        assert tuple(out.size()) == (nInputPlane, height, width)
+        data = out
+    else:
+        data = data_col.new(nInputPlane, height, width)
 
     opt = dict(Dtype=Dtype(data), n=n,
                height_col=height_col,
@@ -173,6 +209,28 @@ def _col2im(data_col, kernel_size, stride, padding):
     return data
 
 
+def im2col_batch(input, kernel_size, stride, padding):
+    if input.dim() == 3:
+        return _im2col(input, kernel_size, stride, padding)
+    elif input.dim() == 4:
+        shape = (input.size(0),) + im2col_shape(input.size()[1:], kernel_size, stride, padding)
+        out = input.new(*shape)
+        for x, o in zip(input, out):
+            _im2col(x, kernel_size, stride, padding, out=o)
+        return out
+
+
+def col2im_batch(grad_output, kernel_size, stride, padding, input_size):
+    if grad_output.dim() == 5:
+        return _col2im(grad_output, kernel_size, stride, padding, input_size)
+    elif grad_output.dim() == 6:
+        shape = (grad_output.size(0),) + col2im_shape(grad_output.size()[1:], kernel_size, stride, padding, input_size)
+        grad_input = grad_output.new(*shape)
+        for go, gx in zip(grad_output, grad_input):
+            _col2im(go, kernel_size, stride, padding, out=gx, input_size=input_size)
+        return grad_input
+
+
 class Im2Col(Function):
     def __init__(self, kernel_size, stride, padding):
         self.kernel_size = kernel_size
@@ -180,10 +238,11 @@ class Im2Col(Function):
         self.padding = padding
 
     def forward(self, input):
-        return _im2col(input, self.kernel_size, self.stride, self.padding)
+        self.input_size = input.size()[-2:]
+        return im2col_batch(input, self.kernel_size, self.stride, self.padding)
 
     def backward(self, grad_output):
-        return _col2im(grad_output, self.kernel_size, self.stride, self.padding)
+        return col2im_batch(grad_output, self.kernel_size, self.stride, self.padding, self.input_size)
 
 
 class Col2Im(Function):
@@ -193,10 +252,10 @@ class Col2Im(Function):
         self.padding = padding
 
     def forward(self, input):
-        return _col2im(input, self.kernel_size, self.stride, self.padding)
+        return col2im_batch(input, self.kernel_size, self.stride, self.padding)
 
     def backward(self, grad_output):
-        return _im2col(grad_output, self.kernel_size, self.stride, self.padding)
+        return im2col_batch(grad_output, self.kernel_size, self.stride, self.padding)
 
 
 def im2col(input, kernel_size, stride, padding):
