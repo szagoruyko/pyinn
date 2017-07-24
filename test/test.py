@@ -1,7 +1,8 @@
 import unittest
+from functools import partial
 import torch
 from torch.autograd import gradcheck, Variable
-from pyinn import ncrelu, dgmm, cdgmm, im2col, col2im
+from pyinn import ncrelu, dgmm, cdgmm, im2col, col2im, conv2d_depthwise
 import torch.nn.functional as F
 
 
@@ -184,6 +185,29 @@ class TestPYINN(unittest.TestCase):
         back = col2im(dst, k, s, pad)
         self.assertEqual((src - back).data.abs().max(), 0)
 
+    def test_conv2d_depthwise(self):
+        n = 6
+        x = Variable(torch.randn(1,n,5,5).double().cuda(), requires_grad=True)
+        w = Variable(torch.randn(n,1,3,3).double().cuda(), requires_grad=True)
+        y_fast = conv2d_depthwise(x, w, padding=1)
+        y_ref = F.conv2d(x, w, padding=1, groups=n)
+        go = torch.randn(y_fast.size()).double().cuda()
+
+        self.assertLess((y_fast - y_ref).data.abs().max(), 1e-9)
+
+        x.requires_grad = True
+        w.requires_grad = True
+        y_fast.backward(go)
+        gx_fast = x.grad.data.clone()
+        gw_fast = w.grad.data.clone()
+
+        x.grad.data.zero_()
+        w.grad.data.zero_()
+        y_ref.backward(go)
+        gx_ref = x.grad.data.clone()
+        gw_ref = w.grad.data.clone()
+
+        self.assertTrue(gradcheck(partial(conv2d_depthwise, padding=1), (x, w,)))
 
 if __name__ == '__main__':
     unittest.main()
