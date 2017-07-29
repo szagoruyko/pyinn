@@ -1,8 +1,6 @@
 import torch
 from torch.autograd import Function
-from pynvrtc.compiler import Program
-from cupy.cuda.function import Module
-from .utils import Stream, get_compute_arch
+from pyinn.utils import Stream, load_kernel
 
 
 kernel = """
@@ -26,32 +24,15 @@ def GET_BLOCKS(N, K=CUDA_NUM_THREADS):
     return (N + K - 1) // K
 
 
-modules = {}
-
-
-def compile(input):
-    if input.get_device() not in modules:
-        print 'compiling for dev', input.get_device()
-        program = Program(kernel, 'ncrelu.cu')
-        ptx = program.compile(['-arch=' + get_compute_arch(input)])
-
-        module = Module()
-        module.load(bytes(ptx.encode()))
-        modules[input.get_device()] = module
-    else:
-        module = modules[input.get_device()]
-    return module
-
-
 def swap(x):
     assert x.size(-1) == 2
     total = x.numel() // 2
-    module = compile(x)
-    f = module.get_function('swap')
-    f(args=[x.data_ptr(), total],
-      block=(CUDA_NUM_THREADS,1,1),
-      grid=(GET_BLOCKS(total),1,1),
-      stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+    with torch.cuda.device_of(x):
+        f = load_kernel('swap', kernel)
+        f(args=[x.data_ptr(), total],
+          block=(CUDA_NUM_THREADS,1,1),
+          grid=(GET_BLOCKS(total),1,1),
+          stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
 
 
 def cublas_cdgmm(A, x, out=None):

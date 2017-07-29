@@ -1,7 +1,5 @@
-from string import Template
 import torch
-import cupy
-from pyinn.utils import Stream, Dtype
+from pyinn.utils import Stream, Dtype, load_kernel
 
 CUDA_NUM_THREADS = 1024
 
@@ -50,13 +48,9 @@ def ncrelu_forward(input):
     n, c, h, w = input.size()
 
     with torch.cuda.device_of(input):
-        module = cupy.cuda.compile_with_cache(Template(kernels).substitute(Dtype=Dtype(input)))
-
         output = input.new(n, 2 * c, h, w)
         mask = torch.cuda.ByteTensor(input.size())
-
-        f = module.get_function('ncrelu_forward')
-
+        f = load_kernel('ncrelu_forward', kernels, Dtype=Dtype(input))
         f(args=[output.data_ptr(), mask.data_ptr(), input.data_ptr(), c*h*w, input.numel()],
           block=(CUDA_NUM_THREADS,1,1),
           grid=(GET_BLOCKS(input.numel()),1,1),
@@ -68,11 +62,10 @@ def ncrelu_backward(grad_output, mask):
     assert grad_output.get_device() == mask.get_device()
     assert grad_output.is_contiguous()
     n, c, h, w = mask.size()
-    grad_input = grad_output.new(mask.size())
 
     with torch.cuda.device_of(grad_output):
-        module = cupy.cuda.compile_with_cache(Template(kernels).substitute(Dtype=Dtype(grad_output)))
-        f = module.get_function('ncrelu_backward')
+        grad_input = grad_output.new(mask.size())
+        f = load_kernel('ncrelu_backward', kernels, Dtype=Dtype(grad_output))
         f(args=[grad_input.data_ptr(), mask.data_ptr(), grad_output.data_ptr(), c*h*w, mask.numel()],
           block=(CUDA_NUM_THREADS,1,1),
           grid=(GET_BLOCKS(mask.numel()),1,1),

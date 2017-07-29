@@ -1,14 +1,11 @@
 from collections import namedtuple
 from cupy.cuda import device
+import cupy
 import torch
+from string import Template
 
 
 Stream = namedtuple('Stream', ['ptr'])
-
-
-def get_compute_arch(t):
-    print 'compute_%s' % device.Device().compute_capability
-    return 'compute_%s' % device.Device().compute_capability
 
 
 def Dtype(t):
@@ -16,3 +13,10 @@ def Dtype(t):
         return 'float'
     elif isinstance(t, torch.cuda.DoubleTensor):
         return 'double'
+
+
+@cupy.util.memoize(for_each_device=True)
+def load_kernel(kernel_name, code, **kwargs):
+    code = Template(code).substitute(**kwargs)
+    kernel_code = cupy.cuda.compile_with_cache(code)
+    return kernel_code.get_function(kernel_name)

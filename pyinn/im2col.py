@@ -1,9 +1,7 @@
 from torch.autograd import Function
 import torch
 from torch.nn.modules.utils import _pair
-import cupy
-from utils import Dtype, Stream
-from string import Template
+from utils import Dtype, Stream, load_kernel
 
 CUDA_NUM_THREADS = 1024
 
@@ -12,8 +10,7 @@ def GET_BLOCKS(N):
     return (N + CUDA_NUM_THREADS - 1) // CUDA_NUM_THREADS
 
 
-def im2col_kernel(**kwargs):
-    kernel = '''
+_im2col_kernel = '''
 #define CUDA_KERNEL_LOOP(i, n)                        \
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; \
       i < (n);                                       \
@@ -46,11 +43,9 @@ __global__ void im2col_kernel(const ${Dtype}* data_im, ${Dtype}* data_col) {
   }
 }
 '''
-    return Template(kernel).substitute(**kwargs)
 
 
-def col2im_kernel(**kwargs):
-    kernel = '''
+_col2im_kernel = '''
 #define CUDA_KERNEL_LOOP(i, n)                        \
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; \
       i < (n);                                       \
@@ -82,10 +77,7 @@ __global__ void col2im_kernel(const ${Dtype}* data_col, ${Dtype}* data_im) {
     data_im[index] = val;
   }
 }
-    '''
-    return Template(kernel).substitute(**kwargs)
-
-im2col_modules = {}
+'''
 
 
 def im2col_shape(size, kernel_size, stride, padding):
@@ -115,18 +107,16 @@ def _im2col(data, kernel_size, stride, padding, out=None):
     else:
         data_col = data.new(*shape)
 
-    opt = dict(Dtype=Dtype(data), n=n,
-               height_col=height_col,
-               width_col=width_col,
-               height=height, width=width,
-               ksize_h=ksize_h, ksize_w=ksize_w,
-               pad_h=pad_h, pad_w=pad_w,
-               stride_h=stride_h, stride_w=stride_w,
-               channels=nInputPlane)
 
     with torch.cuda.device_of(data):
-        module = cupy.cuda.compile_with_cache(im2col_kernel(**opt))
-        f = module.get_function('im2col_kernel')
+        f = load_kernel('im2col_kernel', _im2col_kernel, Dtype=Dtype(data), n=n,
+                        height_col=height_col,
+                        width_col=width_col,
+                        height=height, width=width,
+                        ksize_h=ksize_h, ksize_w=ksize_w,
+                        pad_h=pad_h, pad_w=pad_w,
+                        stride_h=stride_h, stride_w=stride_w,
+                        channels=nInputPlane)
         f(block=(CUDA_NUM_THREADS,1,1),
           grid=(GET_BLOCKS(n),1,1),
           args=[data.data_ptr(), data_col.data_ptr()],
@@ -169,18 +159,15 @@ def _col2im(data_col, kernel_size, stride, padding, out=None, input_size=None):
     else:
         data = data_col.new(nInputPlane, height, width)
 
-    opt = dict(Dtype=Dtype(data), n=n,
-               height_col=height_col,
-               width_col=width_col,
-               height=height, width=width,
-               ksize_h=ksize_h, ksize_w=ksize_w,
-               pad_h=pad_h, pad_w=pad_w,
-               stride_h=stride_h, stride_w=stride_w,
-               channels=nInputPlane)
-
     with torch.cuda.device_of(data_col):
-        module = cupy.cuda.compile_with_cache(col2im_kernel(**opt))
-        f = module.get_function('col2im_kernel')
+        f = load_kernel('col2im_kernel', _col2im_kernel, Dtype=Dtype(data), n=n,
+                        height_col=height_col,
+                        width_col=width_col,
+                        height=height, width=width,
+                        ksize_h=ksize_h, ksize_w=ksize_w,
+                        pad_h=pad_h, pad_w=pad_w,
+                        stride_h=stride_h, stride_w=stride_w,
+                        channels=nInputPlane)
         f(block=(CUDA_NUM_THREADS,1,1),
           grid=(GET_BLOCKS(n),1,1),
           args=[data_col.data_ptr(), data.data_ptr()],
