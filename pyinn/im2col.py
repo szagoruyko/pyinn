@@ -1,9 +1,8 @@
-from pynvrtc.compiler import Program
 from torch.autograd import Function
 import torch
 from torch.nn.modules.utils import _pair
-from cupy.cuda.function import Module
-from utils import get_compute_arch, Dtype, Stream
+import cupy
+from utils import Dtype, Stream
 from string import Template
 
 CUDA_NUM_THREADS = 1024
@@ -99,7 +98,7 @@ def im2col_shape(size, kernel_size, stride, padding):
     return nInputPlane, ksize_h, ksize_w, height_col, width_col
 
 
-def _im2col(data,  kernel_size, stride, padding, out=None):
+def _im2col(data, kernel_size, stride, padding, out=None):
     assert data.dim() == 3 and data.is_cuda
     ksize_h, ksize_w = _pair(kernel_size)
     stride_h, stride_w = _pair(stride)
@@ -125,23 +124,13 @@ def _im2col(data,  kernel_size, stride, padding, out=None):
                stride_h=stride_h, stride_w=stride_w,
                channels=nInputPlane)
 
-    kernel_id = hash(frozenset(opt.items()))
-    if kernel_id not in im2col_modules:
-        kernel = im2col_kernel(**opt)
-        print 'Compiling im2col with', opt
-        prog = Program(kernel, 'im2col.cu')
-        ptx = prog.compile(['-arch='+get_compute_arch(data)])
-        module = Module()
-        module.load(bytes(ptx.encode()))
-        im2col_modules[kernel_id] = module
-    else:
-        module = im2col_modules[kernel_id]
-
-    f = module.get_function('im2col_kernel')
-    f(block=(CUDA_NUM_THREADS,1,1),
-      grid=(GET_BLOCKS(n),1,1),
-      args=[data.data_ptr(), data_col.data_ptr()],
-      stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+    with torch.cuda.device_of(data):
+        module = cupy.cuda.compile_with_cache(im2col_kernel(**opt))
+        f = module.get_function('im2col_kernel')
+        f(block=(CUDA_NUM_THREADS,1,1),
+          grid=(GET_BLOCKS(n),1,1),
+          args=[data.data_ptr(), data_col.data_ptr()],
+          stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
     return data_col
 
 
@@ -189,23 +178,13 @@ def _col2im(data_col, kernel_size, stride, padding, out=None, input_size=None):
                stride_h=stride_h, stride_w=stride_w,
                channels=nInputPlane)
 
-    kernel_id = hash(frozenset(opt.items()))
-    if kernel_id not in col2im_modules:
-        kernel = col2im_kernel(**opt)
-        print 'Compiling col2im with', opt
-        prog = Program(kernel, 'col2im.cu')
-        ptx = prog.compile(['-arch='+get_compute_arch(data_col)])
-        module = Module()
-        module.load(bytes(ptx.encode()))
-        col2im_modules[kernel_id] = module
-    else:
-        module = col2im_modules[kernel_id]
-
-    f = module.get_function('col2im_kernel')
-    f(block=(CUDA_NUM_THREADS,1,1),
-      grid=(GET_BLOCKS(n),1,1),
-      args=[data_col.data_ptr(), data.data_ptr()],
-      stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+    with torch.cuda.device_of(data_col):
+        module = cupy.cuda.compile_with_cache(col2im_kernel(**opt))
+        f = module.get_function('col2im_kernel')
+        f(block=(CUDA_NUM_THREADS,1,1),
+          grid=(GET_BLOCKS(n),1,1),
+          args=[data_col.data_ptr(), data.data_ptr()],
+          stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
     return data
 
 
