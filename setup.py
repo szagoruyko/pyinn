@@ -29,7 +29,7 @@ setup_info = dict(
         'six',
         'pynvrtc',
         'cupy',
-        'scikit-cuda',
+        # 'scikit-cuda',
     ]
 )
 

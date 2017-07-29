@@ -1,9 +1,9 @@
-from pynvrtc.compiler import Program
+from __future__ import print_function
+import cupy
 from torch.autograd import Function
 import torch
 from torch.nn.modules.utils import _pair
-from cupy.cuda.function import Module
-from utils import get_compute_arch, Dtype, Stream
+from pyinn.utils import Dtype, Stream
 from string import Template
 
 CUDA_NUM_THREADS = 1024
@@ -151,22 +151,13 @@ class Conv2dDepthwise(Function):
                    dilation_h=self.dilation[0], dilation_w=self.dilation[1],
                    pad_h=self.padding[0], pad_w=self.padding[1])
 
-        kernel_id = hash(frozenset(opt.items() + [('gpu_id', input.get_device())]))
-        if kernel_id not in fwd_modules:
-            kernel = _conv2d_depthwise_kernel(**opt)
-            prog = Program(kernel, 'conv2d_dw.cu')
-            ptx = prog.compile(['-arch='+get_compute_arch(input)])
-            module = Module()
-            module.load(bytes(ptx.encode()))
-            fwd_modules[kernel_id] = module
-        else:
-            module = fwd_modules[kernel_id]
-
-        f = module.get_function('conv2d_dw_forward_kernel')
-        f(block=(CUDA_NUM_THREADS,1,1),
-          grid=(GET_BLOCKS(n),1,1),
-          args=[input.data_ptr(), weight.data_ptr(), output.data_ptr()],
-          stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+        with torch.cuda.device_of(input):
+            module = cupy.cuda.compile_with_cache(_conv2d_depthwise_kernel(**opt))
+            f = module.get_function('conv2d_dw_forward_kernel')
+            f(block=(CUDA_NUM_THREADS,1,1),
+              grid=(GET_BLOCKS(n),1,1),
+              args=[input.data_ptr(), weight.data_ptr(), output.data_ptr()],
+              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
 
         self.save_for_backward(input, weight)
         return output
@@ -190,51 +181,33 @@ class Conv2dDepthwise(Function):
                    dilation_h=self.dilation[0], dilation_w=self.dilation[1],
                    pad_h=self.padding[0], pad_w=self.padding[1])
 
-        if self.needs_input_grad[0]:
-            grad_input = input.new(input.size())
+        with torch.cuda.device_of(input):
+            if self.needs_input_grad[0]:
+                grad_input = input.new(input.size())
 
-            n = grad_input.numel()
-            opt['nthreads'] = n
+                n = grad_input.numel()
+                opt['nthreads'] = n
 
-            kernel_id = hash(frozenset(opt.items() + [('gpu_id', input.get_device())]))
-            if kernel_id not in bwd_gi_modules:
-                kernel = _conv2d_depthwise_kernel_backward_grad_input(**opt)
-                prog = Program(kernel, 'conv2d_dw.cu')
-                ptx = prog.compile(['-arch='+get_compute_arch(input)])
-                module = Module()
-                module.load(bytes(ptx.encode()))
-                bwd_gi_modules[kernel_id] = module
-            else:
-                module = bwd_gi_modules[kernel_id]
+                module = cupy.cuda.compile_with_cache(_conv2d_depthwise_kernel_backward_grad_input(**opt))
+                f = module.get_function('conv2d_dw_backward_grad_input_kernel')
+                f(block=(CUDA_NUM_THREADS,1,1),
+                  grid=(GET_BLOCKS(n),1,1),
+                  args=[grad_output.data_ptr(), weight.data_ptr(), grad_input.data_ptr()],
+                  stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
 
-            f = module.get_function('conv2d_dw_backward_grad_input_kernel')
-            f(block=(CUDA_NUM_THREADS,1,1),
-              grid=(GET_BLOCKS(n),1,1),
-              args=[grad_output.data_ptr(), weight.data_ptr(), grad_input.data_ptr()],
-              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
-        if self.needs_input_grad[1]:
-            weight_buffer = weight.new(channels, kernel_h, kernel_w, batch_size, output_h, output_w)
+            if self.needs_input_grad[1]:
+                weight_buffer = weight.new(channels, kernel_h, kernel_w, batch_size, output_h, output_w)
 
-            n = weight_buffer.numel()
-            opt['nthreads'] = n
+                n = weight_buffer.numel()
+                opt['nthreads'] = n
 
-            kernel_id = hash(frozenset(opt.items() + [('gpu_id', input.get_device())]))
-            if kernel_id not in bwd_gw_modules:
-                kernel = _conv2d_depthwise_kernel_backward_grad_weight(**opt)
-                prog = Program(kernel, 'conv2d_dw.cu')
-                ptx = prog.compile(['-arch='+get_compute_arch(input)])
-                module = Module()
-                module.load(bytes(ptx.encode()))
-                bwd_gw_modules[kernel_id] = module
-            else:
-                module = bwd_gw_modules[kernel_id]
-
-            f = module.get_function('conv2d_dw_backward_grad_weight_kernel')
-            f(block=(CUDA_NUM_THREADS,1,1),
-              grid=(GET_BLOCKS(n),1,1),
-              args=[grad_output.data_ptr(), input.data_ptr(), weight_buffer.data_ptr()],
-              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
-            grad_weight = weight_buffer.view(weight.size() + (-1,)).sum(-1, keepdim=False)
+                module = cupy.cuda.compile_with_cache(_conv2d_depthwise_kernel_backward_grad_weight(**opt))
+                f = module.get_function('conv2d_dw_backward_grad_weight_kernel')
+                f(block=(CUDA_NUM_THREADS,1,1),
+                  grid=(GET_BLOCKS(n),1,1),
+                  args=[grad_output.data_ptr(), input.data_ptr(), weight_buffer.data_ptr()],
+                  stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+                grad_weight = weight_buffer.view(weight.size() + (-1,)).sum(-1, keepdim=False)
 
         return grad_input, grad_weight
 

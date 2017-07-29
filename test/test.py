@@ -209,5 +209,17 @@ class TestPYINN(unittest.TestCase):
 
         self.assertTrue(gradcheck(partial(conv2d_depthwise, padding=1), (x, w,)))
 
+    def test_conv2d_depthwise_multigpu(self):
+        n = 6
+        a0 = Variable(torch.randn(1,n,5,5).cuda(0), requires_grad=True)
+        a1 = Variable(torch.randn(1,n,5,5).cuda(1), requires_grad=True)
+        w0 = Variable(torch.randn(n,1,3,3).double().cuda(0), requires_grad=True)
+        w1 = Variable(torch.randn(n,1,3,3).double().cuda(1), requires_grad=True)
+        y0 = conv2d_depthwise(a0, w0, padding=1)
+        go = torch.randn(y0.size()).double().cuda()
+        y0.backward(go)
+        y1 = conv2d_depthwise(a1, w1, padding=1)
+        y1.backward(go.cuda(1))
+
 if __name__ == '__main__':
     unittest.main()

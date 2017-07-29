@@ -7,6 +7,7 @@ Stream = namedtuple('Stream', ['ptr'])
 
 
 def get_compute_arch(t):
+    print 'compute_%s' % device.Device().compute_capability
     return 'compute_%s' % device.Device().compute_capability
 
 
