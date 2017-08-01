@@ -86,8 +86,9 @@ class NCRELU(torch.autograd.Function):
 def ncrelu(input):
     """ Applies NCReLU (negative concatenated ReLU) nonlinearity.
 
-    Does `torch.cat([x.clamp(min=0), x.clamp(max=0)], dim=1)` in
-    a single fused op.
+    Does `torch.cat([x.clamp(min=0), x.clamp(max=0)], dim=1)` in a single fused op.
+    See https://arxiv.org/abs/1706.00388
+    DiracNets: Training Very Deep Neural Networks Without Skip-Connections
 
     Args:
         input: 4D tensor

@@ -1,7 +1,7 @@
 from torch.autograd import Function
 import torch
 from torch.nn.modules.utils import _pair
-from utils import Dtype, Stream, load_kernel
+from pyinn.utils import Dtype, Stream, load_kernel
 
 CUDA_NUM_THREADS = 1024
 
@@ -84,10 +84,10 @@ def im2col_shape(size, kernel_size, stride, padding):
     ksize_h, ksize_w = _pair(kernel_size)
     stride_h, stride_w = _pair(stride)
     pad_h, pad_w = _pair(padding)
-    nInputPlane, height, width = size
+    n_input_plane, height, width = size
     height_col = (height + 2 * pad_h - ksize_h) // stride_h + 1
     width_col = (width + 2 * pad_w - ksize_w) // stride_w + 1
-    return nInputPlane, ksize_h, ksize_w, height_col, width_col
+    return n_input_plane, ksize_h, ksize_w, height_col, width_col
 
 
 def _im2col(data, kernel_size, stride, padding, out=None):
@@ -95,18 +95,17 @@ def _im2col(data, kernel_size, stride, padding, out=None):
     ksize_h, ksize_w = _pair(kernel_size)
     stride_h, stride_w = _pair(stride)
     pad_h, pad_w = _pair(padding)
-    nInputPlane, height, width = data.size()
+    n_input_plane, height, width = data.size()
     height_col = (height + 2 * pad_h - ksize_h) // stride_h + 1
     width_col = (width + 2 * pad_w - ksize_w) // stride_w + 1
-    n = nInputPlane * height_col * width_col
+    n = n_input_plane * height_col * width_col
 
-    shape = torch.Size((nInputPlane, ksize_h, ksize_w, height_col, width_col))
+    shape = torch.Size((n_input_plane, ksize_h, ksize_w, height_col, width_col))
     if out is not None:
         assert out.size() == shape
         data_col = out
     else:
         data_col = data.new(*shape)
-
 
     with torch.cuda.device_of(data):
         f = load_kernel('im2col_kernel', _im2col_kernel, Dtype=Dtype(data), n=n,
@@ -116,7 +115,7 @@ def _im2col(data, kernel_size, stride, padding, out=None):
                         ksize_h=ksize_h, ksize_w=ksize_w,
                         pad_h=pad_h, pad_w=pad_w,
                         stride_h=stride_h, stride_w=stride_w,
-                        channels=nInputPlane)
+                        channels=n_input_plane)
         f(block=(CUDA_NUM_THREADS,1,1),
           grid=(GET_BLOCKS(n),1,1),
           args=[data.data_ptr(), data_col.data_ptr()],
@@ -131,13 +130,13 @@ def col2im_shape(size, kernel_size, stride, padding, input_size=None):
     ksize_h, ksize_w = _pair(kernel_size)
     stride_h, stride_w = _pair(stride)
     pad_h, pad_w = _pair(padding)
-    nInputPlane, ksize_h, ksize_w, height_col, width_col = size
+    n_input_plane, ksize_h, ksize_w, height_col, width_col = size
     if input_size is not None:
         height, width = input_size
     else:
         height = (height_col - 1) * stride_h - 2 * pad_h + ksize_h
         width = (width_col - 1) * stride_w - 2 * pad_w + ksize_w
-    return nInputPlane, height, width
+    return n_input_plane, height, width
 
 
 def _col2im(data_col, kernel_size, stride, padding, out=None, input_size=None):
@@ -145,19 +144,19 @@ def _col2im(data_col, kernel_size, stride, padding, out=None, input_size=None):
     ksize_h, ksize_w = _pair(kernel_size)
     stride_h, stride_w = _pair(stride)
     pad_h, pad_w = _pair(padding)
-    nInputPlane, ksize_h, ksize_w, height_col, width_col = data_col.size()
+    n_input_plane, ksize_h, ksize_w, height_col, width_col = data_col.size()
     if input_size is not None:
         height, width = input_size
     else:
         height = (height_col - 1) * stride_h - 2 * pad_h + ksize_h
         width = (width_col - 1) * stride_w - 2 * pad_w + ksize_w
-    n = nInputPlane * height * width
+    n = n_input_plane * height * width
 
     if out is not None:
-        assert tuple(out.size()) == (nInputPlane, height, width)
+        assert tuple(out.size()) == (n_input_plane, height, width)
         data = out
     else:
-        data = data_col.new(nInputPlane, height, width)
+        data = data_col.new(n_input_plane, height, width)
 
     with torch.cuda.device_of(data_col):
         f = load_kernel('col2im_kernel', _col2im_kernel, Dtype=Dtype(data), n=n,
@@ -167,7 +166,7 @@ def _col2im(data_col, kernel_size, stride, padding, out=None, input_size=None):
                         ksize_h=ksize_h, ksize_w=ksize_w,
                         pad_h=pad_h, pad_w=pad_w,
                         stride_h=stride_h, stride_w=stride_w,
-                        channels=nInputPlane)
+                        channels=n_input_plane)
         f(block=(CUDA_NUM_THREADS,1,1),
           grid=(GET_BLOCKS(n),1,1),
           args=[data_col.data_ptr(), data.data_ptr()],
@@ -225,8 +224,21 @@ class Col2Im(Function):
 
 
 def im2col(input, kernel_size, stride, padding):
+    """Converts NCHW tensor into Toeplitz matrix.
+
+    The representation is used to perform GEMM-based convolution.
+    Output is 5D (or 6D in case of minibatch) tensor.
+
+    Minibatch implementation is inefficient, and could be done in a single CUDA kernel.
+
+    TODO: add CPU version (via numpy?)
+    """
     return Im2Col(kernel_size, stride, padding)(input)
 
 
 def col2im(input, kernel_size, stride, padding):
+    """Converts 2D back to NCHW format.
+
+    This is used in backward wrt inputs in GEMM-based convolution.
+    """
     return Col2Im(kernel_size, stride, padding)(input)

@@ -1,5 +1,4 @@
 import torch
-from torch.autograd import Function
 from pyinn.utils import Stream, load_kernel
 
 
@@ -68,7 +67,7 @@ def cublas_cdgmm(A, x, out=None):
         return out
 
 
-class CDGMM(Function):
+class CDGMM(torch.autograd.Function):
     def forward(self, input, x):
         self.save_for_backward(input, x)
         return cublas_cdgmm(input, x)

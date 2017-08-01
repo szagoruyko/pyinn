@@ -197,7 +197,22 @@ class Conv2dDepthwise(Function):
 
 
 def conv2d_depthwise(input, weight, bias=None, stride=1, padding=0, dilation=1):
-    out = Conv2dDepthwise(stride, padding, dilation)(input, weight)
-    if bias is not None:
-        out += bias.view(1,-1,1,1)
+    """Depthwise 2D convolution.
+
+    Implements depthwise convolution as in https://arxiv.org/pdf/1704.04861v1.pdf
+    MobileNets: Efficient Convolutional Neural Networks for Mobile Vision Applications
+
+    CUDA kernels from https://github.com/BVLC/caffe/pull/5665
+    CPU side is done by F.conv2d
+
+    Equivalent to:
+        `F.conv2d(input, weight, groups=input.size(1))`
+    """
+    if input.is_cuda:
+        out = Conv2dDepthwise(stride, padding, dilation)(input, weight)
+        if bias is not None:
+            out += bias.view(1,-1,1,1)
+    else:
+        groups = inputs.size(1)
+        out = F.conv2d(input, weight, bias, stride, padding, dilation, groups)
     return out

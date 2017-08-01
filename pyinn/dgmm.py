@@ -1,5 +1,4 @@
 import torch
-from torch.autograd import Function
 
 
 def cublas_dgmm(A, x, out=None):
@@ -45,7 +44,7 @@ def cublas_dgmm(A, x, out=None):
         return out
 
 
-class DGMM(Function):
+class DGMM(torch.autograd.Function):
     def forward(self, input, x):
         self.save_for_backward(input, x)
         return cublas_dgmm(input, x)

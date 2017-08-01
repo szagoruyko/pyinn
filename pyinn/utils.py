@@ -1,5 +1,4 @@
 from collections import namedtuple
-from cupy.cuda import device
 import cupy
 import torch
 from string import Template
