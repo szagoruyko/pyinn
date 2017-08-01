@@ -3,6 +3,7 @@ from torch.autograd import Function
 import torch
 from torch.nn.modules.utils import _pair
 from pyinn.utils import Dtype, Stream, load_kernel
+import torch.nn.functional as F
 
 CUDA_NUM_THREADS = 1024
 
@@ -213,6 +214,6 @@ def conv2d_depthwise(input, weight, bias=None, stride=1, padding=0, dilation=1):
         if bias is not None:
             out += bias.view(1,-1,1,1)
     else:
-        groups = inputs.size(1)
+        groups = input.size(1)
         out = F.conv2d(input, weight, bias, stride, padding, dilation, groups)
     return out
