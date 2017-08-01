@@ -97,7 +97,7 @@ Args:
 
 ### im2col and col2im
 
-Converts NCHW tensor into Toeplitz matrix.
+Rearrange image blocks into columns.
 
 The representation is used to perform GEMM-based convolution.
 

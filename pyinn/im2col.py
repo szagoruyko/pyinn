@@ -224,9 +224,9 @@ class Col2Im(Function):
 
 
 def im2col(input, kernel_size, stride, padding):
-    """Converts NCHW tensor into Toeplitz matrix.
+    """Rearrange image blocks into columns
 
-    The representation is used to perform GEMM-based convolution.
+    The representation is used in GEMM-based convolution.
     Output is 5D (or 6D in case of minibatch) tensor.
 
     Minibatch implementation is inefficient, and could be done in a single CUDA kernel.
@@ -237,7 +237,7 @@ def im2col(input, kernel_size, stride, padding):
 
 
 def col2im(input, kernel_size, stride, padding):
-    """Converts 2D back to NCHW format.
+    """Converts columns back to NCHW format.
 
     This is used in backward wrt inputs in GEMM-based convolution.
     """
