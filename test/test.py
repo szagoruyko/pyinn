@@ -74,7 +74,7 @@ class TestPYINN(unittest.TestCase):
         inputs.mm(torch.diag(x)).sum().backward()
         g_ref = x.grad.data.clone()
 
-        self.assertEqual((g_ref - g_out).abs().max(), 0)
+        self.assertLess((g_ref - g_out).abs().max(), 1e-6)
         
         # grad wrt inputs and x
         inputs.requires_grad, x.requires_grad = True, True
@@ -90,8 +90,8 @@ class TestPYINN(unittest.TestCase):
         g_x_ref = x.grad.data.clone()
         g_x_inputs_out = inputs.grad.data.clone()
 
-        self.assertEqual((g_ref - g_out).abs().max(), 0)
-        self.assertEqual((g_x_ref - g_x_out).abs().max(), 0)
+        self.assertLess((g_ref - g_out).abs().max(), 1e-6)
+        self.assertLess((g_x_ref - g_x_out).abs().max(), 1e-6)
 
     def testCDGMM(self):
 

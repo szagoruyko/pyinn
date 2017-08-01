@@ -185,7 +185,7 @@ def im2col_batch(input, kernel_size, stride, padding):
         return out
 
 
-def col2im_batch(grad_output, kernel_size, stride, padding, input_size):
+def col2im_batch(grad_output, kernel_size, stride, padding, input_size=None):
     if grad_output.dim() == 5:
         return _col2im(grad_output, kernel_size, stride, padding, input_size)
     elif grad_output.dim() == 6:
@@ -211,13 +211,14 @@ class Im2Col(Function):
 
 
 class Col2Im(Function):
-    def __init__(self, kernel_size, stride, padding):
+    def __init__(self, kernel_size, stride, padding, input_size=None):
         self.kernel_size = kernel_size
         self.stride = stride
         self.padding = padding
+        self.input_size = input_size
 
     def forward(self, input):
-        return col2im_batch(input, self.kernel_size, self.stride, self.padding)
+        return col2im_batch(input, self.kernel_size, self.stride, self.padding, self.input_size)
 
     def backward(self, grad_output):
         return im2col_batch(grad_output, self.kernel_size, self.stride, self.padding)
