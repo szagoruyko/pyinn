@@ -18,6 +18,25 @@ Also, the first version of the package was in PyCUDA, but it can't work with
 PyTorch multi-GPU.
 
 
+## Installation
+
+```
+pip install git+https://github.com/szagoruyko/pyinn.git@master
+```
+
+## Example
+
+```python
+import torch
+from torch.autograd import Variable
+import pyinn as P
+x = Variable(torch.randn(1,4,5,5).cuda())
+w = Variable(torch.randn(4,1,3,3).cuda())
+y = P.conv2d_depthwise(x, w, padding=1)
+```
+
+TODO: add modules interface.
+
 ## Documentation 
 
 ### conv2d_depthwise
