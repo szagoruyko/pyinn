@@ -1,4 +1,3 @@
-from __future__ import print_function
 from torch.autograd import Function
 import torch
 from torch.nn.modules.utils import _pair
