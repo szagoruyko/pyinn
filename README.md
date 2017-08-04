@@ -35,7 +35,13 @@ w = Variable(torch.randn(4,1,3,3).cuda())
 y = P.conv2d_depthwise(x, w, padding=1)
 ```
 
-TODO: add modules interface.
+or with modules interface:
+
+```python
+from pyinn.modules import Conv2dDepthwise
+module = Conv2dDepthwise(channels=4, kernel_size=3, padding=1).cuda()
+y = module(x)
+```
 
 ## Documentation 
 
