@@ -123,8 +123,8 @@ class Conv2dDepthwise(Function):
         assert input.dim() == 4 and input.is_cuda and weight.is_cuda
         batch_size, channels, height, width = input.size()
         kernel_h, kernel_w = weight.size()[2:]
-        output_h = (height + 2 * self.padding[0] - (self.dilation[0] * (kernel_h - 1) + 1)) / self.stride[0] + 1
-        output_w = (width + 2 * self.padding[1] - (self.dilation[1] * (kernel_w - 1) + 1)) / self.stride[1] + 1
+        output_h = int((height + 2 * self.padding[0] - (self.dilation[0] * (kernel_h - 1) + 1)) / self.stride[0] + 1)
+        output_w = int((width + 2 * self.padding[1] - (self.dilation[1] * (kernel_w - 1) + 1)) / self.stride[1] + 1)
 
         output = input.new(batch_size, channels, output_h, output_w)
         n = output.numel()
