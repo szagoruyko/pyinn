@@ -2,7 +2,8 @@ import unittest
 from functools import partial
 import torch
 from torch.autograd import gradcheck, Variable
-from pyinn import ncrelu, dgmm, cdgmm, im2col, col2im, conv2d_depthwise
+import pyinn as P
+from pyinn.modules import Conv2dDepthwise
 import torch.nn.functional as F
 
 
@@ -32,12 +33,12 @@ class TestPYINN(unittest.TestCase):
             #go = Variable(torch.randn(2,10,3,1).cuda(), requires_grad=False)
             go = torch.randn(2,10,3,1).type(dtype)
 
-            self.assertEqual((ncrelu_ref(x).data - ncrelu(x).data).abs().sum(), 0)
+            self.assertEqual((ncrelu_ref(x).data - P.ncrelu(x).data).abs().sum(), 0)
 
             ncrelu_ref(x).backward(go)
             gref = x.grad.data.clone()
             x.grad.data.zero_()
-            ncrelu(x).backward(go)
+            P.ncrelu(x).backward(go)
             g = x.grad.data.clone()
             self.assertLess((g - gref).abs().sum(), 1e-8)
 
@@ -46,17 +47,17 @@ class TestPYINN(unittest.TestCase):
         x = Variable(torch.randn(8).cuda())
 
         c_ref = inputs.mm(torch.diag(x))
-        c_out = dgmm(inputs, x)
+        c_out = P.dgmm(inputs, x)
         self.assertEqual((c_ref.data - c_out.data).abs().max(), 0, 'DGMM left')
 
         # transposed
         c_ref = torch.diag(x).mm(inputs.t())
-        c_out = dgmm(inputs.t().contiguous(), x)
+        c_out = P.dgmm(inputs.t().contiguous(), x)
         self.assertEqual((c_ref.data - c_out.data).abs().max(), 0, 'DGMM right')
 
         # grad wrt inputs
         inputs.requires_grad, x.requires_grad = True, False
-        dgmm(inputs, x).sum().backward()
+        P.dgmm(inputs, x).sum().backward()
         g_out = inputs.grad.data.clone()
 
         inputs.grad.data.zero_()
@@ -67,7 +68,7 @@ class TestPYINN(unittest.TestCase):
 
         # grad wrt x
         inputs.requires_grad, x.requires_grad = False, True
-        dgmm(inputs, x).sum().backward()
+        P.dgmm(inputs, x).sum().backward()
         g_out = x.grad.data.clone()
 
         x.grad.data.zero_()
@@ -80,7 +81,7 @@ class TestPYINN(unittest.TestCase):
         inputs.requires_grad, x.requires_grad = True, True
         x.grad.data.zero_()
         inputs.grad.data.zero_()
-        dgmm(inputs, x).sum().backward()
+        P.dgmm(inputs, x).sum().backward()
         g_x_out = x.grad.data.clone()
         g_inputs_out = inputs.grad.data.clone()
 
@@ -99,12 +100,12 @@ class TestPYINN(unittest.TestCase):
         x = Variable(torch.randn(8, 2).cuda())
 
         c_ref = cdgmm_ref(inputs, x)
-        c_out = cdgmm(inputs, x)
+        c_out = P.cdgmm(inputs, x)
         self.assertLess((c_ref.data - c_out.data).abs().max(), 1e-6, 'CDGMM left')
 
         # grad wrt inputs
         inputs.requires_grad, x.requires_grad = True, False
-        cdgmm(inputs, x).sum().backward()
+        P.cdgmm(inputs, x).sum().backward()
         g_out = inputs.grad.data.clone()
 
         inputs.grad.data.zero_()
@@ -115,7 +116,7 @@ class TestPYINN(unittest.TestCase):
 
         # grad wrt x
         # inputs.requires_grad, x.requires_grad = False, True
-        # cdgmm(inputs, x).sum().backward()
+        # P.cdgmm(inputs, x).sum().backward()
         # g_out = x.grad.data.clone()
 
         # x.grad.data.zero_()
@@ -144,7 +145,7 @@ class TestPYINN(unittest.TestCase):
         def cdgmm_scat(A, B):
             A_ = A.view(-1, A.size(-2)*A.size(-3), 2)
             B_ = B.view(-1, 2)
-            return cdgmm(A_, B_).view_as(A)
+            return P.cdgmm(A_, B_).view_as(A)
 
         for shape in shapes:
             inputs = Variable(torch.randn(*shape[0]).cuda())
@@ -172,8 +173,8 @@ class TestPYINN(unittest.TestCase):
         k = 1
         pad = 0
         s = (1,1)
-        dst = im2col(src, k, s, pad)
-        back = col2im(dst, k, s, pad)
+        dst = P.im2col(src, k, s, pad)
+        back = P.col2im(dst, k, s, pad)
         self.assertEqual((src - back).data.abs().max(), 0)
 
     def test_im2col_batch(self):
@@ -181,15 +182,15 @@ class TestPYINN(unittest.TestCase):
         k = 1
         pad = 0
         s = (1,1)
-        dst = im2col(src, k, s, pad)
-        back = col2im(dst, k, s, pad)
+        dst = P.im2col(src, k, s, pad)
+        back = P.col2im(dst, k, s, pad)
         self.assertEqual((src - back).data.abs().max(), 0)
 
     def test_conv2d_depthwise(self):
         n = 6
         x = Variable(torch.randn(1,n,5,5).double().cuda(), requires_grad=True)
         w = Variable(torch.randn(n,1,3,3).double().cuda(), requires_grad=True)
-        y_fast = conv2d_depthwise(x, w, padding=1)
+        y_fast = P.conv2d_depthwise(x, w, padding=1)
         y_ref = F.conv2d(x, w, padding=1, groups=n)
         go = torch.randn(y_fast.size()).double().cuda()
 
@@ -207,7 +208,7 @@ class TestPYINN(unittest.TestCase):
         gx_ref = x.grad.data.clone()
         gw_ref = w.grad.data.clone()
 
-        self.assertTrue(gradcheck(partial(conv2d_depthwise, padding=1), (x, w,)))
+        self.assertTrue(gradcheck(partial(P.conv2d_depthwise, padding=1), (x, w,)))
 
     def test_conv2d_depthwise_multigpu(self):
         n = 6
@@ -215,11 +216,19 @@ class TestPYINN(unittest.TestCase):
         a1 = Variable(torch.randn(1,n,5,5).cuda(1), requires_grad=True)
         w0 = Variable(torch.randn(n,1,3,3).double().cuda(0), requires_grad=True)
         w1 = Variable(torch.randn(n,1,3,3).double().cuda(1), requires_grad=True)
-        y0 = conv2d_depthwise(a0, w0, padding=1)
+        y0 = P.conv2d_depthwise(a0, w0, padding=1)
         go = torch.randn(y0.size()).double().cuda()
         y0.backward(go)
-        y1 = conv2d_depthwise(a1, w1, padding=1)
+        y1 = P.conv2d_depthwise(a1, w1, padding=1)
         y1.backward(go.cuda(1))
+
+    def test_modules(self):
+        module = Conv2dDepthwise(channels=8, kernel_size=3)
+        x = Variable(torch.randn(1,8,5,5))
+        y = module(x)
+        y_cuda = module.cuda()(x.cuda())
+        self.assertLess((y - y_cuda.cpu()).data.abs().max(), 1e-6)
+
 
 if __name__ == '__main__':
     unittest.main()
