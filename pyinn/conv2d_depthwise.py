@@ -208,6 +208,7 @@ def conv2d_depthwise(input, weight, bias=None, stride=1, padding=0, dilation=1):
     Equivalent to:
         `F.conv2d(input, weight, groups=input.size(1))`
     """
+    assert input.size(1) == weight.size(0)
     if input.is_cuda:
         out = Conv2dDepthwise(stride, padding, dilation)(input, weight)
         if bias is not None:
