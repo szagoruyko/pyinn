@@ -17,6 +17,8 @@ are known at JIT-ing time, and compiled kernels potentially can be faster.
 Also, the first version of the package was in PyCUDA, but it can't work with
 PyTorch multi-GPU.
 
+On Maxwell Titan X `pyinn.conv2d_depthwise` MobileNets are ~2.6x faster than `F.conv2d` [benchmark.py](test/benchmark.py)
+
 
 ## Installation
 
