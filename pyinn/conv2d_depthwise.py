@@ -11,6 +11,20 @@ kernel_loop = '''
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; \
       i < (n);                                       \
       i += blockDim.x * gridDim.x)
+
+#define UNROLL _Pragma("unroll")
+
+#define ldg __ldg
+
+template <typename T>
+inline __device__ T tf_max(const T& x, const T& y) {
+  return x < y ? y : x;
+}
+template <typename T>
+inline __device__ T tf_min(const T& x, const T& y) {
+  return x > y ? y : x;
+}
+
 '''
 
 
@@ -20,6 +34,86 @@ def GET_BLOCKS(N):
 
 _conv2d_depthwise_kernel = kernel_loop + '''
 extern "C"
+__global__ void conv2d_dw_forward_kernel(const ${Dtype}* input, const ${Dtype}* filter, ${Dtype}* output) {
+  const int in_rows = ${bottom_width};
+  const int in_cols = ${bottom_height};
+  const int in_depth = ${channels};
+  const int filter_rows = ${kernel_w};
+  const int filter_cols = ${kernel_h};
+  const int depth_multiplier = 1;
+  const int pad_rows = ${pad_w};
+  const int pad_cols = ${pad_h};
+  const int out_rows = ${top_width};
+  const int out_cols = ${top_height};
+  const int out_depth = ${channels};
+
+  CUDA_KERNEL_LOOP(thread_id, ${nthreads}) {
+    const int OC = thread_id % out_cols;
+    const int OR = (thread_id / out_cols) % out_rows;
+    const int OD = (thread_id / out_cols / out_rows) % out_depth;
+    const int OB = thread_id / out_cols / out_rows / out_depth;
+
+    const int in_d = OD / depth_multiplier;
+    const int multiplier = OD % depth_multiplier;
+
+    const int input_offset_temp = (OB * in_depth + in_d) * (in_rows * in_cols);
+
+    const int input_row_start = OR * ${stride_w} - pad_rows;
+    const int input_col_start = OC * ${stride_h} - pad_cols;
+    const int input_row_end = input_row_start + filter_rows;
+    const int input_col_end = input_col_start + filter_cols;
+
+    ${Dtype} sum = 0;
+    if (input_row_start >= 0 && input_col_start >= 0 &&
+        input_row_end < in_rows && input_col_end < in_cols) {
+      // Loop that doesn't need to check for boundary conditions.
+      UNROLL for (int f_r = 0; f_r < filter_rows; ++f_r) {
+        const int in_r = input_row_start + f_r;
+        const int filter_offset_temp = filter_cols * f_r;
+        UNROLL for (int f_c = 0; f_c < filter_cols; ++f_c) {
+          const int in_c = input_col_start + f_c;
+
+          const int input_offset = (input_offset_temp) + (in_r * in_cols) + in_c;
+          // filters in tensorflow are HWN, in pytorch NHW, so transposed
+          // not sure if this breaks/improves coalescing
+          //const int filter_offset =
+            //  multiplier +
+            //  depth_multiplier * (in_d + in_depth * (f_c + filter_offset_temp));
+          const int filter_offset = in_d * ${kernel_h} * ${kernel_w} + f_c + filter_offset_temp;
+          sum += ldg(input + input_offset) * ldg(filter + filter_offset);
+        }
+      }
+    } else {
+      // Loop that needs to check for boundary conditions.
+      UNROLL for (int f_r = 0; f_r < filter_rows; ++f_r) {
+        const int in_r = input_row_start + f_r;
+        const int filter_offset_temp = filter_cols * f_r;
+        UNROLL for (int f_c = 0; f_c < filter_cols; ++f_c) {
+          const int in_c = input_col_start + f_c;
+          // TODO(vrv): the in_r check can be done outside of this loop;
+          // benchmark both methods to determine the better decision.
+          if (in_r >= 0 && in_r < in_rows && in_c >= 0 && in_c < in_cols) {
+            const int in_c = input_col_start + f_c;
+
+            // input_offset_temp indexes into the start of memory
+            // where the spatial data starts.
+            const int input_offset =
+                (input_offset_temp) + (in_r * in_cols) + in_c;
+
+            //const int filter_offset =
+            //    multiplier + depth_multiplier *
+            //                     (in_d + in_depth * (f_c + filter_offset_temp));
+            const int filter_offset = in_d * ${kernel_h} * ${kernel_w} + f_c + filter_offset_temp;
+            sum += ldg(input + input_offset) * ldg(filter + filter_offset);
+          }
+        }
+      }
+    }
+
+    output[thread_id] = sum;
+  }
+}
+/*
 __global__ void conv2d_dw_forward_kernel(
 const ${Dtype}* bottom_data, const ${Dtype}* weight_data, ${Dtype}* top_data) {
   CUDA_KERNEL_LOOP(index, ${nthreads}) {
@@ -45,11 +139,75 @@ const ${Dtype}* bottom_data, const ${Dtype}* weight_data, ${Dtype}* top_data) {
     top_data[index] = value;
   }
 }
+*/
 '''
 
 
 _conv2d_depthwise_kernel_backward_grad_input = kernel_loop + '''
 extern "C"
+__global__ void conv2d_dw_backward_grad_input_kernel(const ${Dtype}* const out_backprop,
+                    const ${Dtype}* const filter, ${Dtype}* const in_backprop) {
+  const int in_rows = ${bottom_width};
+  const int in_cols = ${bottom_height};
+  const int in_depth = ${channels};
+  const int filter_rows = ${kernel_w};
+  const int filter_cols = ${kernel_h};
+  const int depth_multiplier = 1;
+  const int pad_rows = ${pad_w};
+  const int pad_cols = ${pad_h};
+  const int out_rows = ${top_width};
+  const int out_cols = ${top_height};
+  const int out_depth = ${channels};
+
+  // TODO(vrv): Consider assigning threads to output and using
+  // atomics for accumulation, similar to the filter case.
+  CUDA_KERNEL_LOOP(thread_id, ${nthreads}) {
+    // Compute the indexes of this thread in the input.
+    const int in_c = thread_id % in_cols;
+    const int in_r = (thread_id / in_cols) % in_rows;
+    const int in_d = (thread_id / in_cols / in_rows) % in_depth;
+    const int b = thread_id / in_depth / in_cols / in_rows;
+
+    ${Dtype} sum = 0;
+    const int out_d_start = in_d * depth_multiplier;
+    const int out_d_end = out_d_start + depth_multiplier;
+
+    const int out_r_start =
+        tf_max<int>(0, (in_r - filter_rows + pad_rows + ${stride_w}) / ${stride_w});
+    const int out_r_end = tf_min(out_rows - 1, (in_r + pad_rows) / ${stride_w});
+    const int out_c_start =
+        tf_max(0, (in_c - filter_cols + pad_cols + ${stride_h}) / ${stride_h});
+    const int out_c_end = tf_min(out_cols - 1, (in_c + pad_cols) / ${stride_h});
+
+    UNROLL for (int out_d = out_d_start; out_d < out_d_end; ++out_d) {
+      UNROLL for (int out_r = out_r_start; out_r <= out_r_end; ++out_r) {
+        const int f_r = in_r + pad_rows - out_r * ${stride_w};
+        const int filter_dm = out_d - out_d_start;
+
+        const int temp_filter_offset = filter_cols * f_r;
+        for (int out_c = out_c_start; out_c <= out_c_end; ++out_c) {
+          const int f_c = in_c + pad_cols - out_c * ${stride_h};
+          //const int filter_offset =
+            //  filter_dm + args.depth_multiplier *
+            //                  (in_d + in_depth * (f_c + temp_filter_offset));
+          const int filter_offset = in_d * ${kernel_w} * ${kernel_h} + f_c + temp_filter_offset;
+
+          const int out_backprop_offset =
+              (b * out_depth * out_rows * out_cols) +
+              (out_d * out_rows * out_cols) + (out_r * out_cols) + (out_c);
+
+          sum += ldg(out_backprop + out_backprop_offset) *
+                 ldg(filter + filter_offset);
+        }
+      }
+    }
+    const int in_backprop_offset = (b * in_rows * in_cols * in_depth) +
+                                   (in_d * in_rows * in_cols) +
+                                   (in_r * in_cols) + (in_c);
+    in_backprop[in_backprop_offset] = sum;
+  }
+}
+/*
 __global__ void conv2d_dw_backward_grad_input_kernel(
     const ${Dtype}* const top_diff, const ${Dtype}* const weight_data, ${Dtype}* const bottom_diff) {
   CUDA_KERNEL_LOOP(index, ${nthreads}) {
@@ -79,6 +237,7 @@ __global__ void conv2d_dw_backward_grad_input_kernel(
     bottom_diff[index] = value;
   }
 }
+*/
 '''
 
 
