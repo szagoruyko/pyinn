@@ -50,6 +50,7 @@ f_torch, params = mobilenet(18, 1, fconv2d)
 f_pyinn(x, params).sum().backward()
 f_torch(x, params).sum().backward()
 
+torch.cuda.synchronize()
 meter = TimeMeter('s')
 
 for i in range(10):
