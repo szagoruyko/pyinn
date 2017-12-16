@@ -138,7 +138,6 @@ def col2im_shape(size, kernel_size, stride, padding, input_size=None):
         width = (width_col - 1) * stride_w - 2 * pad_w + ksize_w
     return n_input_plane, height, width
 
-
 def _col2im(data_col, kernel_size, stride, padding, out=None, input_size=None):
     assert data_col.dim() == 5
     ksize_h, ksize_w = _pair(kernel_size)
@@ -187,7 +186,7 @@ def im2col_batch(input, kernel_size, stride, padding):
 
 def col2im_batch(grad_output, kernel_size, stride, padding, input_size=None):
     if grad_output.dim() == 5:
-        return _col2im(grad_output, kernel_size, stride, padding, input_size)
+        return _col2im(grad_output, kernel_size, stride, padding, out=None, input_size=input_size)
     elif grad_output.dim() == 6:
         shape = (grad_output.size(0),) + col2im_shape(grad_output.size()[1:], kernel_size, stride, padding, input_size)
         grad_input = grad_output.new(*shape)
