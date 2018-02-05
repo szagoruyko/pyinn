@@ -202,10 +202,14 @@ class Im2Col(Function):
         self.padding = padding
 
     def forward(self, input):
+        assert(input.is_contiguous())
         self.input_size = input.size()[-2:]
         return im2col_batch(input, self.kernel_size, self.stride, self.padding)
 
     def backward(self, grad_output):
+        if not grad_output.is_contiguous():
+            grad_output = grad_output.contiguous()
+        assert(grad_output.is_contiguous())
         return col2im_batch(grad_output, self.kernel_size, self.stride, self.padding, self.input_size)
 
 
@@ -217,9 +221,13 @@ class Col2Im(Function):
         self.input_size = input_size
 
     def forward(self, input):
+        assert(input.is_contiguous())
         return col2im_batch(input, self.kernel_size, self.stride, self.padding, self.input_size)
 
     def backward(self, grad_output):
+        if not grad_output.is_contiguous():
+            grad_output = grad_output.contiguous()
+        assert(grad_output.is_contiguous())        
         return im2col_batch(grad_output, self.kernel_size, self.stride, self.padding)
 
 
